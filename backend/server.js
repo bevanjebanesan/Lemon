@@ -11,22 +11,42 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// Set up PeerJS server
+// Set up PeerJS server with more configuration
 const peerServer = ExpressPeerServer(server, {
-  path: '/peerjs',
   debug: true,
+  path: '/peerjs',
   allow_discovery: true,
+  proxied: true,
+  ssl: {
+    key: null,
+    cert: null
+  },
+  generateClientId: () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
+});
+
+// Log PeerJS events
+peerServer.on('connection', (client) => {
+  console.log('PeerJS Client connected:', client.getId());
+});
+
+peerServer.on('disconnect', (client) => {
+  console.log('PeerJS Client disconnected:', client.getId());
+});
+
+peerServer.on('error', (error) => {
+  console.error('PeerJS Server error:', error);
 });
 
 app.use('/peerjs', peerServer);
 
-// Allow connections from any origin
+// Allow connections from frontend
 const io = socketIO(server, {
   cors: {
-    origin: '*',
+    origin: process.env.FRONTEND_URL,
     methods: ['GET', 'POST'],
     credentials: true
-  }
+  },
+  transports: ['websocket']
 });
 
 // Middleware
@@ -36,17 +56,26 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Simple endpoint to check if server is running
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ message: 'Zoomie server is running' });
+  res.json({ 
+    message: 'Zoomie server is running',
+    env: {
+      nodeEnv: process.env.NODE_ENV,
+      frontendUrl: process.env.FRONTEND_URL,
+      mongoDbConnected: mongoose.connection.readyState === 1
+    }
+  });
 });
 
 // Get meeting info
 app.get('/meeting/:id', (req, res) => {
   const meetingId = req.params.id;
+  const joinUrl = `${process.env.FRONTEND_URL}/meeting/${meetingId}`;
+  console.log('Generated meeting URL:', joinUrl);
   res.json({
     meetingId,
-    joinUrl: `${process.env.FRONTEND_URL}/meeting/${meetingId}`
+    joinUrl
   });
 });
 
@@ -60,68 +89,67 @@ const rooms = new Map();
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  console.log('Socket.IO Client connected:', socket.id);
 
-  // Join meeting room
   socket.on('join-room', (roomId, userId) => {
-    // Leave previous room if any
+    console.log(`User ${userId} joining room ${roomId}`);
+    
+    // Leave previous rooms
     Array.from(socket.rooms).forEach(room => {
       if (room !== socket.id) {
         socket.leave(room);
-        // Update user count in the room they're leaving
-        if (rooms.has(room)) {
-          rooms.set(room, rooms.get(room) - 1);
-          if (rooms.get(room) <= 0) {
-            rooms.delete(room);
-          }
-        }
+        updateRoomCount(room, -1);
       }
     });
 
     // Join new room
     socket.join(roomId);
+    updateRoomCount(roomId, 1);
     
-    // Initialize or update room count
-    rooms.set(roomId, (rooms.get(roomId) || 0) + 1);
-    
-    // Notify others in the room
+    // Notify others
     socket.to(roomId).emit('user-connected', userId);
-    
-    // Notify everyone in the room about the updated user count
-    io.to(roomId).emit('user-joined', {
-      userId,
-      totalUsers: rooms.get(roomId)
-    });
+    broadcastRoomCount(roomId);
 
     // Handle disconnect
     socket.on('disconnect', () => {
-      console.log('User disconnected:', socket.id);
-      if (rooms.has(roomId)) {
-        rooms.set(roomId, rooms.get(roomId) - 1);
-        if (rooms.get(roomId) <= 0) {
-          rooms.delete(roomId);
-        }
-        // Notify others about the updated user count
-        io.to(roomId).emit('user-joined', {
-          totalUsers: rooms.get(roomId) || 0
-        });
-      }
+      console.log(`User ${userId} disconnected from room ${roomId}`);
+      updateRoomCount(roomId, -1);
+      broadcastRoomCount(roomId);
     });
   });
 
-  // Handle chat messages
   socket.on('send-message', (roomId, message) => {
-    // Broadcast the message to all users in the room
+    console.log(`Message in room ${roomId}:`, message);
     io.to(roomId).emit('receive-message', message);
   });
 
-  // Handle speech-to-text data
   socket.on('speech-to-text', (roomId, text) => {
     socket.to(roomId).emit('receive-transcript', text);
   });
 });
 
+function updateRoomCount(roomId, change) {
+  const currentCount = rooms.get(roomId) || 0;
+  const newCount = Math.max(0, currentCount + change);
+  
+  if (newCount === 0) {
+    rooms.delete(roomId);
+  } else {
+    rooms.set(roomId, newCount);
+  }
+  
+  return newCount;
+}
+
+function broadcastRoomCount(roomId) {
+  const count = rooms.get(roomId) || 0;
+  io.to(roomId).emit('user-joined', {
+    totalUsers: count
+  });
+}
+
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Frontend URL:', process.env.FRONTEND_URL);
 });

@@ -73,100 +73,133 @@ const Meeting: React.FC = () => {
   const meetingUrl = `${process.env.REACT_APP_FRONTEND_URL}/meeting/${meetingId}`;
 
   useEffect(() => {
-    // Initialize WebSocket connection
-    const newSocket = io(process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000', {
+    const backendUrl = process.env.REACT_APP_BACKEND_URL;
+    if (!backendUrl) {
+      console.error('Backend URL not configured');
+      return;
+    }
+
+    console.log('Connecting to backend:', backendUrl);
+    const newSocket = io(backendUrl, {
       transports: ['websocket'],
       withCredentials: true
     });
+
     setSocket(newSocket);
 
-    // Generate a random peer ID
-    const peerId = `peer-${Math.random().toString(36).slice(2)}`;
+    const peerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    
+    const backendHostname = new URL(backendUrl).hostname;
+    console.log('PeerJS connecting to:', backendHostname);
 
-    // Initialize PeerJS with the render.com domain
     const newPeer = new Peer(peerId, {
-      host: new URL(process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000').hostname,
+      host: backendHostname,
       secure: true,
       port: 443,
       path: '/peerjs',
-      debug: 2,
+      debug: 3,
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          {
+          { 
             urls: 'turn:numb.viagenie.ca',
             username: 'webrtc@live.com',
             credential: 'muazkh'
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
           }
-        ],
-      },
+        ]
+      }
     });
 
-    // Handle PeerJS connection events
     newPeer.on('open', (id) => {
-      console.log('My peer ID is:', id);
+      console.log('Connected to PeerJS server with ID:', id);
       setPeer(newPeer);
+      initializeMedia();
     });
 
     newPeer.on('error', (error) => {
       console.error('PeerJS error:', error);
-      alert('Connection error. Please try refreshing the page.');
+      if (error.type === 'browser-incompatible') {
+        alert('Your browser might not support WebRTC. Please try using Chrome or Firefox.');
+      } else if (error.type === 'disconnected') {
+        alert('Connection lost. Please check your internet connection and refresh the page.');
+      } else {
+        alert('Connection error. Please try refreshing the page.');
+      }
     });
 
-    // Get user media with error handling
     const initializeMedia = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+        console.log('Requesting media devices...');
+        const constraints = {
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          },
           audio: true
-        });
+        };
+        console.log('Media constraints:', constraints);
+        
+        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('Media access granted:', mediaStream.getTracks().map(t => t.kind));
+        
         setStream(mediaStream);
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
+          console.log('Local video stream set');
         }
-      } catch (error) {
-        console.error('Error accessing media devices:', error);
-        alert('Unable to access camera/microphone. Please check your permissions.');
+      } catch (error: any) {
+        console.error('Media access error:', error);
+        if (error.name === 'NotAllowedError') {
+          alert('Camera/Microphone access denied. Please allow access in your browser settings.');
+        } else if (error.name === 'NotFoundError') {
+          alert('No camera/microphone found. Please check your device connections.');
+        } else {
+          alert(`Error accessing media devices: ${error.message}`);
+        }
       }
     };
 
-    initializeMedia();
-
-    // Initialize speech recognition
-    if ('webkitSpeechRecognition' in window) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition;
-      recognition.current = new SpeechRecognition();
-      recognition.current.continuous = true;
-      recognition.current.interimResults = true;
-
-      recognition.current.onresult = (event: any) => {
-        const results = Array.from(event.results) as any[];
-        const transcript = results
-          .map(result => result[0].transcript)
-          .join('');
-        setTranscription(transcript);
-        
-        if (socket && results[results.length - 1].isFinal) {
-          socket.emit('speech-to-text', meetingId, transcript);
-        }
-      };
-
-      recognition.current.start();
-    }
-
     return () => {
-      stream?.getTracks().forEach(track => track.stop());
-      socket?.disconnect();
-      peer?.destroy();
-      recognition.current?.stop();
+      console.log('Cleaning up connections...');
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('Stopped track:', track.kind);
+        });
+      }
+      if (socket) {
+        socket.disconnect();
+        console.log('Socket disconnected');
+      }
+      if (peer) {
+        peer.destroy();
+        console.log('Peer destroyed');
+      }
+      if (recognition.current) {
+        recognition.current.stop();
+        console.log('Speech recognition stopped');
+      }
     };
   }, [meetingId]);
 
   useEffect(() => {
-    if (!socket || !peer || !stream) return;
+    if (!socket || !peer || !stream) {
+      console.log('Waiting for all connections...', { 
+        socket: !!socket, 
+        peer: !!peer, 
+        stream: !!stream 
+      });
+      return;
+    }
 
+    console.log('All connections ready, joining room:', meetingId);
     socket.emit('join-room', meetingId, peer.id);
 
     peer.on('call', (call) => {
@@ -175,6 +208,9 @@ const Meeting: React.FC = () => {
       call.on('stream', (remoteStream) => {
         console.log('Received remote stream');
         addVideoStream(remoteStream);
+      });
+      call.on('error', (error) => {
+        console.error('Error in call:', error);
       });
     });
 
@@ -218,7 +254,6 @@ const Meeting: React.FC = () => {
     video.playsInline = true;
     const remoteVideos = document.getElementById('remote-videos');
     if (remoteVideos) {
-      // Remove any existing video elements for this stream
       const existingVideos = remoteVideos.getElementsByTagName('video');
       for (let i = 0; i < existingVideos.length; i++) {
         const existingVideo = existingVideos[i];
@@ -260,7 +295,7 @@ const Meeting: React.FC = () => {
       const message: Message = {
         id: Math.random().toString(36).substr(2, 9),
         userId: peer?.id || '',
-        userName: 'User', // TODO: Add proper user names
+        userName: 'User', 
         content: newMessage,
         timestamp: new Date(),
       };
@@ -314,7 +349,6 @@ const Meeting: React.FC = () => {
         </Paper>
       </Box>
 
-      {/* Share Meeting Dialog */}
       <Dialog open={isShareDialogOpen} onClose={() => setIsShareDialogOpen(false)}>
         <DialogTitle>Share Meeting</DialogTitle>
         <DialogContent>
@@ -339,7 +373,6 @@ const Meeting: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Success Snackbar */}
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={3000}
@@ -350,7 +383,6 @@ const Meeting: React.FC = () => {
         </Alert>
       </Snackbar>
 
-      {/* Chat Drawer */}
       <ChatDrawer
         anchor="right"
         open={isChatOpen}
