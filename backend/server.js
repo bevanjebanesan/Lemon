@@ -41,16 +41,18 @@ app.use('/peerjs', peerServer);
 // Allow connections from frontend
 const io = socketIO(server, {
   cors: {
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app',
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['websocket']
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app',
   credentials: true
 }));
 app.use(express.json());
@@ -70,7 +72,7 @@ app.get('/', (req, res) => {
 // Get meeting info
 app.get('/meeting/:id', (req, res) => {
   const meetingId = req.params.id;
-  const joinUrl = `${process.env.FRONTEND_URL}/meeting/${meetingId}`;
+  const joinUrl = `${process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app'}/meeting/${meetingId}`;
   console.log('Generated meeting URL:', joinUrl);
   res.json({
     meetingId,
@@ -86,6 +88,11 @@ io.on('connection', (socket) => {
   console.log('Socket.IO Client connected:', socket.id);
 
   socket.on('join-room', (roomId, userId) => {
+    if (!roomId || !userId) {
+      console.error('Invalid join-room request:', { roomId, userId });
+      return;
+    }
+
     console.log(`User ${userId} joining room ${roomId}`);
     
     // Leave previous rooms
@@ -100,17 +107,38 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     updateRoomCount(roomId, 1);
     
-    // Notify others
+    // Notify others in the room
     socket.to(roomId).emit('user-connected', userId);
-    broadcastRoomCount(roomId);
+    
+    // Send current participant count
+    const count = rooms.get(roomId) || 1;
+    io.to(roomId).emit('user-joined', { totalUsers: count });
+
+    // Handle messages
+    socket.on('send-message', (messageRoomId, message) => {
+      if (messageRoomId !== roomId) return; // Only handle messages for current room
+      
+      console.log(`Message in room ${roomId}:`, message);
+      io.to(roomId).emit('receive-message', {
+        ...message,
+        timestamp: new Date()
+      });
+    });
 
     // Handle disconnect
-    socket.on('disconnect', () => {
+    const handleDisconnect = () => {
       console.log(`User ${userId} disconnected from room ${roomId}`);
       socket.to(roomId).emit('user-disconnected', userId);
       updateRoomCount(roomId, -1);
-      broadcastRoomCount(roomId);
-    });
+      const newCount = rooms.get(roomId) || 0;
+      io.to(roomId).emit('user-joined', { totalUsers: newCount });
+      
+      // Clean up event listeners
+      socket.removeListener('disconnect', handleDisconnect);
+      socket.removeAllListeners('send-message');
+    };
+
+    socket.on('disconnect', handleDisconnect);
   });
 
   socket.on('send-message', (roomId, message) => {
@@ -120,6 +148,8 @@ io.on('connection', (socket) => {
 });
 
 function updateRoomCount(roomId, change) {
+  if (!roomId) return 0;
+  
   const currentCount = rooms.get(roomId) || 0;
   const newCount = Math.max(0, currentCount + change);
   
@@ -129,6 +159,7 @@ function updateRoomCount(roomId, change) {
     rooms.set(roomId, newCount);
   }
   
+  console.log(`Room ${roomId} count updated:`, newCount);
   return newCount;
 }
 
@@ -147,5 +178,5 @@ mongoose.connect(process.env.MONGODB_URI)
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log('Frontend URL:', process.env.FRONTEND_URL);
+  console.log('Frontend URL:', process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app');
 });
