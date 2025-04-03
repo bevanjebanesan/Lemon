@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// Set up PeerJS server with more configuration
+// Set up PeerJS server
 const peerServer = ExpressPeerServer(server, {
   debug: true,
   path: '/peerjs',
@@ -20,8 +20,7 @@ const peerServer = ExpressPeerServer(server, {
   ssl: {
     key: null,
     cert: null
-  },
-  generateClientId: () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }
 });
 
 // Log PeerJS events
@@ -58,7 +57,7 @@ app.use(express.json());
 
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Zoomie server is running',
     env: {
       nodeEnv: process.env.NODE_ENV,
@@ -78,11 +77,6 @@ app.get('/meeting/:id', (req, res) => {
     joinUrl
   });
 });
-
-// Database connection
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
 
 // Track connected users in each room
 const rooms = new Map();
@@ -113,6 +107,7 @@ io.on('connection', (socket) => {
     // Handle disconnect
     socket.on('disconnect', () => {
       console.log(`User ${userId} disconnected from room ${roomId}`);
+      socket.to(roomId).emit('user-disconnected', userId);
       updateRoomCount(roomId, -1);
       broadcastRoomCount(roomId);
     });
@@ -121,10 +116,6 @@ io.on('connection', (socket) => {
   socket.on('send-message', (roomId, message) => {
     console.log(`Message in room ${roomId}:`, message);
     io.to(roomId).emit('receive-message', message);
-  });
-
-  socket.on('speech-to-text', (roomId, text) => {
-    socket.to(roomId).emit('receive-transcript', text);
   });
 });
 
@@ -147,6 +138,11 @@ function broadcastRoomCount(roomId) {
     totalUsers: count
   });
 }
+
+// Database connection
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

@@ -7,21 +7,66 @@ import {
   Box,
   TextField,
   Paper,
+  CircularProgress,
 } from '@mui/material';
 import { v4 as uuidv4 } from 'uuid';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const [meetingId, setMeetingId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const createMeeting = () => {
-    const newMeetingId = uuidv4();
-    navigate(`/meeting/${newMeetingId}`);
+  const createMeeting = async () => {
+    try {
+      setIsLoading(true);
+      const newMeetingId = uuidv4();
+      console.log('Creating meeting with ID:', newMeetingId);
+      
+      // Verify backend is accessible
+      const backendUrl = process.env.REACT_APP_BACKEND_URL;
+      if (!backendUrl) {
+        throw new Error('Backend URL not configured');
+      }
+
+      const response = await fetch(`${backendUrl}/meeting/${newMeetingId}`);
+      if (!response.ok) {
+        throw new Error('Failed to create meeting');
+      }
+
+      console.log('Meeting created successfully');
+      navigate(`/meeting/${newMeetingId}`);
+    } catch (error) {
+      console.error('Error creating meeting:', error);
+      alert('Failed to create meeting. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const joinMeeting = () => {
-    if (meetingId.trim()) {
+  const joinMeeting = async () => {
+    if (!meetingId.trim()) return;
+
+    try {
+      setIsLoading(true);
+      console.log('Joining meeting:', meetingId);
+      
+      const backendUrl = process.env.REACT_APP_BACKEND_URL;
+      if (!backendUrl) {
+        throw new Error('Backend URL not configured');
+      }
+
+      const response = await fetch(`${backendUrl}/meeting/${meetingId}`);
+      if (!response.ok) {
+        throw new Error('Meeting not found');
+      }
+
+      console.log('Meeting exists, joining...');
       navigate(`/meeting/${meetingId}`);
+    } catch (error) {
+      console.error('Error joining meeting:', error);
+      alert('Failed to join meeting. Please check the meeting ID and try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -42,9 +87,14 @@ const Home: React.FC = () => {
             size="large"
             fullWidth
             onClick={createMeeting}
+            disabled={isLoading}
             sx={{ mb: 3 }}
           >
-            Create New Meeting
+            {isLoading ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              'Create New Meeting'
+            )}
           </Button>
 
           <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
@@ -58,13 +108,18 @@ const Home: React.FC = () => {
               value={meetingId}
               onChange={(e) => setMeetingId(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && joinMeeting()}
+              disabled={isLoading}
             />
             <Button
               variant="contained"
               onClick={joinMeeting}
-              disabled={!meetingId.trim()}
+              disabled={!meetingId.trim() || isLoading}
             >
-              Join
+              {isLoading ? (
+                <CircularProgress size={24} color="inherit" />
+              ) : (
+                'Join'
+              )}
             </Button>
           </Box>
         </Paper>

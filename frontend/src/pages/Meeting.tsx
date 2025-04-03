@@ -1,57 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { io, Socket } from 'socket.io-client';
+import Peer from 'peerjs';
 import {
+  Box,
+  Button,
   Container,
   Paper,
   Typography,
-  TextField,
-  Button,
-  List,
-  ListItem,
-  ListItemText,
-  Box,
-  IconButton,
-  Drawer,
   Snackbar,
   Alert,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
+  IconButton,
 } from '@mui/material';
-import {
-  Mic,
-  MicOff,
-  Videocam,
-  VideocamOff,
-  Chat,
-  Close,
-  Share,
-  ContentCopy,
-} from '@mui/icons-material';
-import { styled } from '@mui/material/styles';
-import { io, Socket } from 'socket.io-client';
-import Peer from 'peerjs';
+import ChatIcon from '@mui/icons-material/Chat';
+import ShareIcon from '@mui/icons-material/Share';
+import MicIcon from '@mui/icons-material/Mic';
+import MicOffIcon from '@mui/icons-material/MicOff';
+import VideocamIcon from '@mui/icons-material/Videocam';
+import VideocamOffIcon from '@mui/icons-material/VideocamOff';
 import { Message } from '../types';
-
-const StyledVideo = styled('video')({
-  width: '100%',
-  borderRadius: '8px',
-});
-
-const StyledPaper = styled(Paper)(({ theme }) => ({
-  padding: theme.spacing(2),
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-}));
-
-const ChatDrawer = styled(Drawer)({
-  '& .MuiDrawer-paper': {
-    width: '300px',
-    padding: '16px',
-  },
-});
+import ChatDrawer from '../components/ChatDrawer';
 
 const Meeting: React.FC = () => {
   const { id: meetingId } = useParams<{ id: string }>();
@@ -59,16 +27,13 @@ const Meeting: React.FC = () => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [transcription, setTranscription] = useState('');
-  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [participantCount, setParticipantCount] = useState(1);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const recognition = useRef<any>(null);
+  const remoteVideosRef = useRef<HTMLDivElement>(null);
 
   const meetingUrl = `${process.env.REACT_APP_FRONTEND_URL}/meeting/${meetingId}`;
 
@@ -85,15 +50,21 @@ const Meeting: React.FC = () => {
       withCredentials: true
     });
 
+    newSocket.on('connect', () => {
+      console.log('Socket connected');
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+    });
+
     setSocket(newSocket);
 
     const peerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    
-    const backendHostname = new URL(backendUrl).hostname;
-    console.log('PeerJS connecting to:', backendHostname);
+    console.log('Initializing peer with ID:', peerId);
 
     const newPeer = new Peer(peerId, {
-      host: backendHostname,
+      host: new URL(backendUrl).hostname,
       secure: true,
       port: 443,
       path: '/peerjs',
@@ -102,72 +73,54 @@ const Meeting: React.FC = () => {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
-          { 
+          {
             urls: 'turn:numb.viagenie.ca',
             username: 'webrtc@live.com',
             credential: 'muazkh'
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
           }
         ]
       }
     });
 
     newPeer.on('open', (id) => {
-      console.log('Connected to PeerJS server with ID:', id);
+      console.log('PeerJS connected with ID:', id);
       setPeer(newPeer);
       initializeMedia();
     });
 
     newPeer.on('error', (error) => {
       console.error('PeerJS error:', error);
-      if (error.type === 'browser-incompatible') {
-        alert('Your browser might not support WebRTC. Please try using Chrome or Firefox.');
-      } else if (error.type === 'disconnected') {
-        alert('Connection lost. Please check your internet connection and refresh the page.');
-      } else {
-        alert('Connection error. Please try refreshing the page.');
-      }
+      alert('Connection error. Please try refreshing the page.');
     });
 
     const initializeMedia = async () => {
       try {
         console.log('Requesting media devices...');
-        const constraints = {
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: 'user'
-          },
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
           audio: true
-        };
-        console.log('Media constraints:', constraints);
-        
-        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log('Media access granted:', mediaStream.getTracks().map(t => t.kind));
-        
+        });
+
+        console.log('Media access granted');
         setStream(mediaStream);
+
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
-          console.log('Local video stream set');
+          videoRef.current.play().catch(error => {
+            console.error('Error playing local video:', error);
+          });
         }
       } catch (error: any) {
         console.error('Media access error:', error);
         if (error.name === 'NotAllowedError') {
-          alert('Camera/Microphone access denied. Please allow access in your browser settings.');
-        } else if (error.name === 'NotFoundError') {
-          alert('No camera/microphone found. Please check your device connections.');
+          alert('Please allow camera and microphone access to join the meeting.');
         } else {
-          alert(`Error accessing media devices: ${error.message}`);
+          alert('Error accessing camera/microphone. Please check your device settings.');
         }
       }
     };
 
     return () => {
-      console.log('Cleaning up connections...');
       if (stream) {
         stream.getTracks().forEach(track => {
           track.stop();
@@ -182,244 +135,230 @@ const Meeting: React.FC = () => {
         peer.destroy();
         console.log('Peer destroyed');
       }
-      if (recognition.current) {
-        recognition.current.stop();
-        console.log('Speech recognition stopped');
-      }
     };
   }, [meetingId]);
 
   useEffect(() => {
-    if (!socket || !peer || !stream) {
-      console.log('Waiting for all connections...', { 
-        socket: !!socket, 
-        peer: !!peer, 
-        stream: !!stream 
-      });
-      return;
-    }
+    if (!socket || !peer || !stream) return;
 
-    console.log('All connections ready, joining room:', meetingId);
+    console.log('Joining room:', meetingId);
     socket.emit('join-room', meetingId, peer.id);
-
-    peer.on('call', (call) => {
-      console.log('Receiving call from:', call.peer);
-      call.answer(stream);
-      call.on('stream', (remoteStream) => {
-        console.log('Received remote stream');
-        addVideoStream(remoteStream);
-      });
-      call.on('error', (error) => {
-        console.error('Error in call:', error);
-      });
-    });
 
     socket.on('user-connected', (userId) => {
       console.log('User connected:', userId);
       connectToNewUser(userId, stream);
     });
 
-    socket.on('user-joined', ({ totalUsers }) => {
-      console.log('Total users in room:', totalUsers);
-      setParticipantCount(totalUsers);
+    socket.on('user-disconnected', (userId) => {
+      console.log('User disconnected:', userId);
+      removeUserVideo(userId);
     });
 
     socket.on('receive-message', (message: Message) => {
+      console.log('Received message:', message);
       setMessages(prev => [...prev, message]);
     });
 
-    socket.on('receive-transcript', (text: string) => {
-      setTranscription(text);
+    peer.on('call', (call) => {
+      console.log('Receiving call from:', call.peer);
+      call.answer(stream);
+      
+      call.on('stream', (remoteStream) => {
+        console.log('Received remote stream');
+        addVideoStream(call.peer, remoteStream);
+      });
     });
+
+    return () => {
+      socket.off('user-connected');
+      socket.off('user-disconnected');
+      socket.off('receive-message');
+    };
   }, [socket, peer, stream, meetingId]);
 
   const connectToNewUser = (userId: string, stream: MediaStream) => {
-    console.log('Connecting to new user:', userId);
+    console.log('Connecting to user:', userId);
     const call = peer?.call(userId, stream);
+    
     if (call) {
       call.on('stream', (remoteStream) => {
-        console.log('Received stream from new user');
-        addVideoStream(remoteStream);
+        console.log('Received stream from:', userId);
+        addVideoStream(userId, remoteStream);
       });
-      call.on('error', (error) => {
-        console.error('Error in call:', error);
+
+      call.on('close', () => {
+        console.log('Call closed with:', userId);
+        removeUserVideo(userId);
       });
     }
   };
 
-  const addVideoStream = (remoteStream: MediaStream) => {
+  const addVideoStream = (userId: string, stream: MediaStream) => {
+    if (!remoteVideosRef.current) return;
+
+    // Remove existing video if any
+    removeUserVideo(userId);
+
+    const videoContainer = document.createElement('div');
+    videoContainer.id = `video-${userId}`;
+    videoContainer.style.position = 'relative';
+    
     const video = document.createElement('video');
-    video.srcObject = remoteStream;
+    video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
-    const remoteVideos = document.getElementById('remote-videos');
-    if (remoteVideos) {
-      const existingVideos = remoteVideos.getElementsByTagName('video');
-      for (let i = 0; i < existingVideos.length; i++) {
-        const existingVideo = existingVideos[i];
-        if (existingVideo.srcObject === remoteStream) {
-          existingVideo.remove();
-          break;
-        }
-      }
-      remoteVideos.appendChild(video);
-    }
+    video.style.width = '100%';
+    video.style.borderRadius = '8px';
+
+    videoContainer.appendChild(video);
+    remoteVideosRef.current.appendChild(videoContainer);
+
+    video.play().catch(error => {
+      console.error('Error playing remote video:', error);
+    });
   };
 
-  const copyMeetingLink = () => {
-    navigator.clipboard.writeText(meetingUrl);
-    setSnackbarOpen(true);
-    setIsShareDialogOpen(false);
+  const removeUserVideo = (userId: string) => {
+    const videoContainer = document.getElementById(`video-${userId}`);
+    if (videoContainer) {
+      videoContainer.remove();
+    }
   };
 
   const toggleAudio = () => {
     if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !isAudioEnabled;
-      });
-      setIsAudioEnabled(!isAudioEnabled);
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsAudioEnabled(audioTrack.enabled);
+      }
     }
   };
 
   const toggleVideo = () => {
     if (stream) {
-      stream.getVideoTracks().forEach(track => {
-        track.enabled = !isVideoEnabled;
-      });
-      setIsVideoEnabled(!isVideoEnabled);
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoEnabled(videoTrack.enabled);
+      }
     }
   };
 
-  const sendMessage = () => {
-    if (socket && newMessage.trim()) {
-      const message: Message = {
-        id: Math.random().toString(36).substr(2, 9),
-        userId: peer?.id || '',
-        userName: 'User', 
-        content: newMessage,
-        timestamp: new Date(),
-      };
-      socket.emit('send-message', meetingId, message);
-      setNewMessage('');
-    }
+  const handleSendMessage = (content: string) => {
+    if (!socket || !content.trim()) return;
+
+    const message: Message = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      userId: peer?.id || '',
+      userName: 'You',
+      content: content.trim(),
+      timestamp: new Date(),
+    };
+
+    socket.emit('send-message', meetingId, message);
+    setMessages(prev => [...prev, message]);
+  };
+
+  const copyMeetingLink = () => {
+    navigator.clipboard.writeText(meetingUrl);
+    setSnackbarOpen(true);
   };
 
   return (
-    <Container maxWidth="xl" sx={{ height: '100vh', py: 2 }}>
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Typography variant="h5">Meeting: {meetingId}</Typography>
-              <Typography variant="subtitle2" color="textSecondary">
-                {participantCount} participant{participantCount !== 1 ? 's' : ''}
-              </Typography>
-            </Box>
-            <Box>
-              <IconButton onClick={toggleAudio}>
-                {isAudioEnabled ? <Mic /> : <MicOff />}
-              </IconButton>
-              <IconButton onClick={toggleVideo}>
-                {isVideoEnabled ? <Videocam /> : <VideocamOff />}
-              </IconButton>
-              <IconButton onClick={() => setIsChatOpen(true)}>
-                <Chat />
-              </IconButton>
-              <IconButton onClick={() => setIsShareDialogOpen(true)}>
-                <Share />
-              </IconButton>
-            </Box>
-          </Box>
-        </Box>
-
-        <Box sx={{ flexGrow: 1, mb: 2 }}>
-          <StyledPaper>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-              <Box>
-                <StyledVideo ref={videoRef} autoPlay muted playsInline />
-              </Box>
-              <Box id="remote-videos" />
-            </Box>
-          </StyledPaper>
-        </Box>
-
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6">Live Transcription</Typography>
-          <Typography>{transcription}</Typography>
-        </Paper>
-      </Box>
-
-      <Dialog open={isShareDialogOpen} onClose={() => setIsShareDialogOpen(false)}>
-        <DialogTitle>Share Meeting</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              Share this link with others to join the meeting:
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2 }}>
-              <TextField
-                fullWidth
-                value={meetingUrl}
-                InputProps={{ readOnly: true }}
-              />
-              <IconButton onClick={copyMeetingLink}>
-                <ContentCopy />
-              </IconButton>
-            </Box>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsShareDialogOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={3000}
-        onClose={() => setSnackbarOpen(false)}
-      >
-        <Alert severity="success" sx={{ width: '100%' }}>
-          Meeting link copied to clipboard!
-        </Alert>
-      </Snackbar>
-
-      <ChatDrawer
-        anchor="right"
-        open={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
-      >
+    <Container maxWidth="xl">
+      <Box sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6">Chat</Typography>
-          <IconButton onClick={() => setIsChatOpen(false)}>
-            <Close />
-          </IconButton>
+          <Typography variant="h6">
+            Meeting Room ({participantCount} participant{participantCount !== 1 ? 's' : ''})
+          </Typography>
+          <Box>
+            <IconButton onClick={toggleAudio}>
+              {isAudioEnabled ? <MicIcon /> : <MicOffIcon color="error" />}
+            </IconButton>
+            <IconButton onClick={toggleVideo}>
+              {isVideoEnabled ? <VideocamIcon /> : <VideocamOffIcon color="error" />}
+            </IconButton>
+            <IconButton onClick={() => setIsChatOpen(!isChatOpen)}>
+              <ChatIcon />
+            </IconButton>
+            <IconButton onClick={copyMeetingLink}>
+              <ShareIcon />
+            </IconButton>
+          </Box>
         </Box>
 
-        <List sx={{ flexGrow: 1, overflow: 'auto' }}>
-          {messages.map((message) => (
-            <ListItem key={message.id}>
-              <ListItemText
-                primary={message.userName}
-                secondary={message.content}
+        <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 100px)' }}>
+          <Box sx={{ flex: 1 }}>
+            <Paper 
+              sx={{ 
+                p: 1, 
+                backgroundColor: '#f5f5f5',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2
+              }}
+            >
+              <Box sx={{ position: 'relative', width: '300px' }}>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  style={{
+                    width: '100%',
+                    borderRadius: '8px',
+                    transform: 'scaleX(-1)'
+                  }}
+                />
+                <Typography
+                  sx={{
+                    position: 'absolute',
+                    bottom: 8,
+                    left: 8,
+                    color: 'white',
+                    backgroundColor: 'rgba(0,0,0,0.5)',
+                    padding: '2px 8px',
+                    borderRadius: 1,
+                  }}
+                >
+                  You
+                </Typography>
+              </Box>
+              
+              <Box 
+                ref={remoteVideosRef}
+                sx={{
+                  flex: 1,
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                  gap: 2,
+                  overflow: 'auto'
+                }}
               />
-            </ListItem>
-          ))}
-        </List>
-
-        <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-          <TextField
-            fullWidth
-            size="small"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type a message..."
-            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-          />
-          <Button variant="contained" onClick={sendMessage}>
-            Send
-          </Button>
+            </Paper>
+          </Box>
         </Box>
-      </ChatDrawer>
+
+        <ChatDrawer
+          open={isChatOpen}
+          anchor="right"
+          messages={messages}
+          onClose={() => setIsChatOpen(false)}
+          onSendMessage={handleSendMessage}
+        />
+
+        <Snackbar
+          open={snackbarOpen}
+          autoHideDuration={3000}
+          onClose={() => setSnackbarOpen(false)}
+        >
+          <Alert severity="success">
+            Meeting link copied to clipboard!
+          </Alert>
+        </Snackbar>
+      </Box>
     </Container>
   );
 };
