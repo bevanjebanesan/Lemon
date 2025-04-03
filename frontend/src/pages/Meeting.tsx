@@ -26,7 +26,7 @@ const Meeting: React.FC = () => {
   const { id: meetingId } = useParams<{ id: string }>();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [peer, setPeer] = useState<Peer | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
@@ -37,40 +37,145 @@ const Meeting: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteVideosRef = useRef<HTMLDivElement>(null);
-  const [mediaRequested, setMediaRequested] = useState(false);
 
   const meetingUrl = `${process.env.REACT_APP_FRONTEND_URL}/meeting/${meetingId}`;
   const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
-  const initializeMedia = async () => {
+  const initializeMediaDevices = async (retryCount = 0) => {
     try {
-      console.log('Requesting media devices...');
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user'
+        }
+      };
 
-      console.log('Media access granted:', mediaStream.getTracks().map(t => t.kind));
-      setStream(mediaStream);
-
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setLocalStream(stream);
       if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        await videoRef.current.play();
-        console.log('Local video playing');
+        videoRef.current.srcObject = stream;
+      }
+      return stream;
+    } catch (error) {
+      console.error('Media device error:', error);
+      if (error instanceof DOMException) {
+        if (error.name === 'NotAllowedError') {
+          setError('Please allow camera and microphone access to join the meeting.');
+        } else if (error.name === 'NotFoundError') {
+          setError('No camera or microphone found. Please connect a device.');
+        } else if (error.name === 'NotReadableError') {
+          if (retryCount < 3) {
+            console.log('Device busy, retrying...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return initializeMediaDevices(retryCount + 1);
+          }
+          setError('Could not access your camera/microphone. Please check if another app is using them.');
+        } else {
+          setError('Error accessing media devices. Please check your settings.');
+        }
+      }
+      return null;
+    }
+  };
+
+  const toggleAudio = () => {
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsAudioEnabled(audioTrack.enabled);
+      }
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoEnabled(videoTrack.enabled);
+      }
+    }
+  };
+
+  const setupPeerConnection = async (stream: MediaStream) => {
+    if (!stream || !backendUrl) return;
+
+    const peerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    console.log('Initializing PeerJS with ID:', peerId);
+
+    const peerHost = new URL(backendUrl).hostname;
+    console.log('PeerJS host:', peerHost);
+
+    const newPeer = new Peer(peerId, {
+      host: peerHost,
+      port: 443,
+      path: '/peerjs',
+      secure: true,
+      debug: 3,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          {
+            urls: 'turn:numb.viagenie.ca',
+            username: 'webrtc@live.com',
+            credential: 'muazkh'
+          }
+        ]
+      }
+    });
+
+    newPeer.on('error', (err) => {
+      console.error('PeerJS error:', err);
+      if (err.type === 'network') {
+        setError('Network connection lost. Please check your internet connection.');
+      } else if (err.type === 'disconnected') {
+        setError('Disconnected from the meeting. Trying to reconnect...');
+        newPeer.reconnect();
+      } else {
+        setError('Connection error. Please try rejoining the meeting.');
+      }
+    });
+
+    return newPeer;
+  };
+
+  const initializeMeeting = async () => {
+    setError('');
+    setIsLoading(true);
+
+    try {
+      // First get media devices
+      const stream = await initializeMediaDevices();
+      if (!stream) {
+        setIsLoading(false);
+        return;
       }
 
-      return mediaStream;
-    } catch (error: any) {
-      console.error('Media access error:', error);
-      if (error.name === 'NotAllowedError') {
-        throw new Error('Please allow camera and microphone access to join the meeting');
-      } else if (error.name === 'NotFoundError') {
-        throw new Error('No camera or microphone found. Please check your device connections');
-      } else if (error.name === 'NotReadableError') {
-        throw new Error('Your camera or microphone is already in use by another application');
-      } else {
-        throw new Error('Failed to access camera/microphone. Please check your device settings');
+      // Then set up peer connection
+      const peer = await setupPeerConnection(stream);
+      if (!peer) {
+        setIsLoading(false);
+        setError('Failed to establish connection. Please try again.');
+        return;
       }
+
+      setPeer(peer);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Meeting initialization error:', error);
+      setError('Failed to initialize meeting. Please try again.');
+      setIsLoading(false);
     }
   };
 
@@ -81,108 +186,18 @@ const Meeting: React.FC = () => {
       return;
     }
 
-    const setupMeeting = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-
-        // 1. Get media stream first
-        if (!mediaRequested) {
-          setMediaRequested(true);
-          const mediaStream = await initializeMedia();
-          if (!mediaStream) return;
-        }
-
-        // 2. Set up Socket.IO
-        console.log('Connecting to backend:', backendUrl);
-        const newSocket = io(backendUrl, {
-          transports: ['websocket'],
-          withCredentials: true,
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-        });
-
-        newSocket.on('connect_error', (error) => {
-          console.error('Socket connection error:', error);
-          setError('Unable to connect to the server. Please check your internet connection');
-        });
-
-        newSocket.on('connect', () => {
-          console.log('Socket connected successfully');
-        });
-
-        setSocket(newSocket);
-
-        // 3. Set up PeerJS
-        const peerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        console.log('Initializing PeerJS with ID:', peerId);
-
-        const peerHost = new URL(backendUrl).hostname;
-        console.log('PeerJS host:', peerHost);
-
-        const newPeer = new Peer(peerId, {
-          host: peerHost,
-          secure: true,
-          port: 443,
-          path: '/peerjs',
-          debug: 3,
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-              {
-                urls: 'turn:numb.viagenie.ca',
-                username: 'webrtc@live.com',
-                credential: 'muazkh'
-              }
-            ]
-          }
-        });
-
-        newPeer.on('open', (id) => {
-          console.log('PeerJS connected with ID:', id);
-          setPeer(newPeer);
-          setIsLoading(false);
-        });
-
-        newPeer.on('error', (error) => {
-          console.error('PeerJS error:', error);
-          setError('Connection error. Please try refreshing the page');
-        });
-
-        return () => {
-          if (stream) {
-            stream.getTracks().forEach(track => {
-              track.stop();
-              console.log('Stopped track:', track.kind);
-            });
-          }
-          newSocket.disconnect();
-          newPeer.destroy();
-        };
-      } catch (error: any) {
-        console.error('Meeting setup error:', error);
-        setError(error.message || 'Failed to set up meeting');
-        setIsLoading(false);
-      }
-    };
-
-    const cleanup = setupMeeting();
-    return () => {
-      cleanup.then(cleanupFn => cleanupFn && cleanupFn());
-    };
-  }, [backendUrl, mediaRequested]);
+    initializeMeeting();
+  }, [backendUrl]);
 
   useEffect(() => {
-    if (!socket || !peer || !stream || !meetingId) return;
+    if (!socket || !peer || !localStream || !meetingId) return;
 
     console.log('Joining room:', meetingId);
     socket.emit('join-room', meetingId, peer.id);
 
     const handleUserConnected = (userId: string) => {
       console.log('User connected:', userId);
-      const call = peer.call(userId, stream);
+      const call = peer.call(userId, localStream);
       if (call) {
         call.on('stream', (remoteStream) => {
           console.log('Received stream from:', userId);
@@ -198,7 +213,7 @@ const Meeting: React.FC = () => {
 
     const handleIncomingCall = (call: any) => {
       console.log('Receiving call from:', call.peer);
-      call.answer(stream);
+      call.answer(localStream);
       
       call.on('stream', (remoteStream: MediaStream) => {
         console.log('Received remote stream from:', call.peer);
@@ -220,7 +235,7 @@ const Meeting: React.FC = () => {
       socket.off('receive-message');
       // peer.off('call', handleIncomingCall); // PeerJS doesn't support off
     };
-  }, [socket, peer, stream, meetingId]);
+  }, [socket, peer, localStream, meetingId]);
 
   const addVideoStream = (userId: string, stream: MediaStream) => {
     if (!remoteVideosRef.current) return;
@@ -251,28 +266,6 @@ const Meeting: React.FC = () => {
     const videoContainer = document.getElementById(`video-${userId}`);
     if (videoContainer) {
       videoContainer.remove();
-    }
-  };
-
-  const toggleAudio = () => {
-    if (stream) {
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsAudioEnabled(audioTrack.enabled);
-        console.log('Audio track enabled:', audioTrack.enabled);
-      }
-    }
-  };
-
-  const toggleVideo = () => {
-    if (stream) {
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsVideoEnabled(videoTrack.enabled);
-        console.log('Video track enabled:', videoTrack.enabled);
-      }
     }
   };
 
