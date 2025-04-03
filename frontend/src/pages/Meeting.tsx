@@ -74,28 +74,65 @@ const Meeting: React.FC = () => {
 
   useEffect(() => {
     // Initialize WebSocket connection
-    const newSocket = io(process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000');
+    const newSocket = io(process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000', {
+      transports: ['websocket'],
+      withCredentials: true
+    });
     setSocket(newSocket);
 
-    // Initialize PeerJS
-    const newPeer = new Peer({
-      host: window.location.hostname,
-      port: Number(process.env.REACT_APP_BACKEND_PORT || 5000),
-      path: '/peerjs',
-      secure: window.location.protocol === 'https:'
-    });
-    setPeer(newPeer);
+    // Generate a random peer ID
+    const peerId = `peer-${Math.random().toString(36).slice(2)}`;
 
-    // Get user media
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((mediaStream) => {
+    // Initialize PeerJS with the render.com domain
+    const newPeer = new Peer(peerId, {
+      host: new URL(process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000').hostname,
+      secure: true,
+      port: 443,
+      path: '/peerjs',
+      debug: 2,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          {
+            urls: 'turn:numb.viagenie.ca',
+            username: 'webrtc@live.com',
+            credential: 'muazkh'
+          }
+        ],
+      },
+    });
+
+    // Handle PeerJS connection events
+    newPeer.on('open', (id) => {
+      console.log('My peer ID is:', id);
+      setPeer(newPeer);
+    });
+
+    newPeer.on('error', (error) => {
+      console.error('PeerJS error:', error);
+      alert('Connection error. Please try refreshing the page.');
+    });
+
+    // Get user media with error handling
+    const initializeMedia = async () => {
+      try {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
         setStream(mediaStream);
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
-      })
-      .catch((error) => console.error('Error accessing media devices:', error));
+      } catch (error) {
+        console.error('Error accessing media devices:', error);
+        alert('Unable to access camera/microphone. Please check your permissions.');
+      }
+    };
+
+    initializeMedia();
 
     // Initialize speech recognition
     if ('webkitSpeechRecognition' in window) {
@@ -133,30 +170,21 @@ const Meeting: React.FC = () => {
     socket.emit('join-room', meetingId, peer.id);
 
     peer.on('call', (call) => {
+      console.log('Receiving call from:', call.peer);
       call.answer(stream);
       call.on('stream', (remoteStream) => {
-        // Add remote stream to the UI
-        const video = document.createElement('video');
-        video.srcObject = remoteStream;
-        video.autoplay = true;
-        video.playsInline = true;
-        document.getElementById('remote-videos')?.appendChild(video);
+        console.log('Received remote stream');
+        addVideoStream(remoteStream);
       });
     });
 
     socket.on('user-connected', (userId) => {
-      const call = peer.call(userId, stream);
-      call.on('stream', (remoteStream) => {
-        // Add remote stream to the UI
-        const video = document.createElement('video');
-        video.srcObject = remoteStream;
-        video.autoplay = true;
-        video.playsInline = true;
-        document.getElementById('remote-videos')?.appendChild(video);
-      });
+      console.log('User connected:', userId);
+      connectToNewUser(userId, stream);
     });
 
     socket.on('user-joined', ({ totalUsers }) => {
+      console.log('Total users in room:', totalUsers);
       setParticipantCount(totalUsers);
     });
 
@@ -168,6 +196,40 @@ const Meeting: React.FC = () => {
       setTranscription(text);
     });
   }, [socket, peer, stream, meetingId]);
+
+  const connectToNewUser = (userId: string, stream: MediaStream) => {
+    console.log('Connecting to new user:', userId);
+    const call = peer?.call(userId, stream);
+    if (call) {
+      call.on('stream', (remoteStream) => {
+        console.log('Received stream from new user');
+        addVideoStream(remoteStream);
+      });
+      call.on('error', (error) => {
+        console.error('Error in call:', error);
+      });
+    }
+  };
+
+  const addVideoStream = (remoteStream: MediaStream) => {
+    const video = document.createElement('video');
+    video.srcObject = remoteStream;
+    video.autoplay = true;
+    video.playsInline = true;
+    const remoteVideos = document.getElementById('remote-videos');
+    if (remoteVideos) {
+      // Remove any existing video elements for this stream
+      const existingVideos = remoteVideos.getElementsByTagName('video');
+      for (let i = 0; i < existingVideos.length; i++) {
+        const existingVideo = existingVideos[i];
+        if (existingVideo.srcObject === remoteStream) {
+          existingVideo.remove();
+          break;
+        }
+      }
+      remoteVideos.appendChild(video);
+    }
+  };
 
   const copyMeetingLink = () => {
     navigator.clipboard.writeText(meetingUrl);
@@ -203,7 +265,6 @@ const Meeting: React.FC = () => {
         timestamp: new Date(),
       };
       socket.emit('send-message', meetingId, message);
-      setMessages(prev => [...prev, message]);
       setNewMessage('');
     }
   };
