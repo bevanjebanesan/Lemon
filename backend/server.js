@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
+const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 
@@ -32,32 +33,32 @@ app.use('/peerjs', peerServer);
 // Basic middleware
 app.use(express.json());
 
-// CORS setup - before any routes
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'https://lemon-uzoe.vercel.app'
-];
+// CORS setup
+app.use(cors({
+  origin: true, // Allow all origins in development
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+// Routes
+app.get('/meeting/:id', (req, res) => {
+  const meetingId = req.params.id;
+  
+  // Check if meeting exists in our rooms Map
+  if (!rooms.has(meetingId)) {
+    // If it doesn't exist, create it
+    rooms.set(meetingId, { users: new Set() });
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
+  
+  res.json({ 
+    meetingId,
+    message: 'Meeting created successfully'
+  });
 });
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.status(500).json({ error: err.message });
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
 });
 
 // Health check route
@@ -91,13 +92,20 @@ app.get('/meeting/:id', (req, res) => {
   }
 });
 
-// Socket.IO setup with same CORS config
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Global error:', err);
+  res.status(500).json({ error: err.message });
+});
+
+// Socket.IO setup with CORS
 const io = socketIO(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: true,
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true
-  }
+  },
+  transports: ['websocket', 'polling']
 });
 
 const rooms = new Map();

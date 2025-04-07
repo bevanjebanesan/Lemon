@@ -20,24 +20,19 @@ const Home: React.FC = () => {
     try {
       setIsLoading(true);
       const newMeetingId = uuidv4();
-      console.log('Creating meeting with ID:', newMeetingId);
-      
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
-      console.log('Using backend URL:', backendUrl);
-
+      
       const response = await fetch(`${backendUrl}/meeting/${newMeetingId}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
-        mode: 'cors', // Explicitly set CORS mode
         credentials: 'include'
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create meeting: ${errorText}`);
+        throw new Error('Failed to create meeting');
       }
 
       const data = await response.json();
