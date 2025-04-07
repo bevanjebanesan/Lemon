@@ -5,24 +5,13 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
-const https = require('https');
-const fs = require('fs');
 
 // Load environment variables
 dotenv.config();
 
 // Create Express app and HTTP server
 const app = express();
-let server;
-if (process.env.NODE_ENV === 'production') {
-  const options = {
-    key: fs.readFileSync('server-key.pem'),
-    cert: fs.readFileSync('server-cert.pem')
-  };
-  server = https.createServer(options, app);
-} else {
-  server = http.createServer(app);
-}
+const server = http.createServer(app);
 
 // Basic middleware
 app.use(express.json());
@@ -61,7 +50,7 @@ app.use(cors(corsOptions));
 const peerServer = ExpressPeerServer(server, {
   debug: true,
   path: '/',
-  ssl: process.env.NODE_ENV === 'production',
+  ssl: false,
   port: process.env.PORT || 5000,
   allow_discovery: true,
   proxied: true,
