@@ -28,11 +28,10 @@ const Home: React.FC = () => {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Origin': window.location.origin
+          'Content-Type': 'application/json'
         },
         mode: 'cors',
-        credentials: 'include'
+        credentials: 'omit'
       });
 
       if (!response.ok) {

@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
+const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 const { router: meetingRouter, rooms } = require('./routes/meeting');
@@ -16,18 +17,22 @@ const server = http.createServer(app);
 // Basic middleware
 app.use(express.json());
 
-// Enable CORS for all routes
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin);
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
+// Simple CORS middleware
+app.use(cors());
+
+// Add headers before the routes are defined
+app.use(function (req, res, next) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Accept');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+
+    // Handle OPTIONS method
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+
+    next();
 });
 
 // PeerJS Server setup
@@ -41,19 +46,13 @@ const peerServer = ExpressPeerServer(server, {
 // Mount PeerJS server
 app.use('/peerjs', peerServer);
 
-// Socket.IO setup with same CORS
+// Socket.IO setup
 const io = socketIO(server, {
   cors: {
-    origin: function(origin, callback) {
-      console.log('🌐 Incoming request from origin:', origin);
-      callback(null, true);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'Origin'],
-    optionsSuccessStatus: 200
-  },
-  transports: ['websocket', 'polling']
+    origin: "*",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["content-type"]
+  }
 });
 
 // Routes
