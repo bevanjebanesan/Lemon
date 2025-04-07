@@ -41,10 +41,40 @@ peerServer.on('error', (error) => {
 
 app.use('/peerjs', peerServer);
 
-// Allow connections from frontend with better CORS configuration
+// CORS middleware to ensure headers are set properly
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://lemon-uzoe.vercel.app');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
+// Regular CORS setup
+app.use(cors({
+  origin: 'https://lemon-uzoe.vercel.app',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
+
+app.use(express.json());
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Global error:', err);
+  res.status(500).json({ error: err.message });
+});
+
+// Socket.IO CORS config
 const io = socketIO(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app',
+    origin: 'https://lemon-uzoe.vercel.app',
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -55,37 +85,44 @@ const io = socketIO(server, {
   allowEIO3: true
 });
 
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-app.use(express.json());
-
-// Health check endpoint
+// Health check endpoint with detailed info
 app.get('/', (req, res) => {
   res.json({
     message: 'Zoomie server is running',
     env: {
       nodeEnv: process.env.NODE_ENV,
-      frontendUrl: process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app',
+      frontendUrl: process.env.FRONTEND_URL,
       mongoDbConnected: mongoose.connection.readyState === 1
     }
   });
 });
 
-// Get meeting info
+// Get meeting info with better error handling
 app.get('/meeting/:id', (req, res) => {
-  const meetingId = req.params.id;
-  const joinUrl = `${process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app'}/meeting/${meetingId}`;
-  console.log('Generated meeting URL:', joinUrl);
-  res.json({
-    meetingId,
-    joinUrl
-  });
+  try {
+    const meetingId = req.params.id;
+    if (!meetingId) {
+      throw new Error('Meeting ID is required');
+    }
+
+    console.log('Creating meeting:', {
+      id: meetingId,
+      origin: req.headers.origin,
+      frontendUrl: process.env.FRONTEND_URL
+    });
+
+    const joinUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/meeting/${meetingId}`;
+    console.log('Generated meeting URL:', joinUrl);
+
+    res.json({
+      meetingId,
+      joinUrl,
+      serverTime: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error creating meeting:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Track connected users in each room
