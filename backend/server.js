@@ -98,21 +98,10 @@ const io = socketIO(server, {
 const rooms = new Map();
 
 // Routes
-app.get('/meeting/:id', (req, res) => {
-  const meetingId = req.params.id;
-  console.log('📝 Creating/joining meeting:', meetingId);
-  
-  if (!rooms.has(meetingId)) {
-    rooms.set(meetingId, { users: new Set() });
-  }
-  
-  res.json({ 
-    meetingId,
-    message: 'Meeting created successfully'
-  });
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'Zoomie API is running' });
 });
 
-// Health check route
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -123,22 +112,28 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Meeting route
+// Meeting routes
 app.get('/meeting/:id', (req, res) => {
   try {
     const meetingId = req.params.id;
-    if (!meetingId) throw new Error('Meeting ID is required');
-
-    const joinUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/meeting/${meetingId}`;
-
-    res.json({
+    console.log('📝 Creating/joining meeting:', meetingId);
+    
+    if (!rooms.has(meetingId)) {
+      console.log('🆕 Creating new meeting room:', meetingId);
+      rooms.set(meetingId, { users: new Set() });
+    }
+    
+    res.json({ 
       meetingId,
-      joinUrl,
-      serverTime: new Date().toISOString(),
+      message: 'Meeting created/joined successfully',
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error creating meeting:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error in /meeting/:id:', error);
+    res.status(500).json({ 
+      error: 'Failed to create/join meeting',
+      details: error.message
+    });
   }
 });
 
@@ -146,62 +141,24 @@ app.get('/meeting/:id', (req, res) => {
 io.on('connection', (socket) => {
   console.log('🔌 Socket connected:', socket.id);
 
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
+  socket.on('join-meeting', (meetingId) => {
+    console.log('👋 User joining meeting:', meetingId);
+    socket.join(meetingId);
+    
+    const room = rooms.get(meetingId);
+    if (room) {
+      room.users.add(socket.id);
+      io.to(meetingId).emit('user-joined', {
+        userId: socket.id,
+        userCount: room.users.size
+      });
+    }
   });
 
-  socket.on('join-room', (roomId, userId) => {
-    if (!roomId || !userId) return;
-
-    console.log(`User ${userId} joining room ${roomId}`);
-
-    // Leave previous rooms
-    Array.from(socket.rooms).forEach((room) => {
-      if (room !== socket.id) {
-        socket.leave(room);
-        updateRoomCount(room, -1);
-      }
-    });
-
-    socket.join(roomId);
-    const count = updateRoomCount(roomId, 1);
-    socket.to(roomId).emit('user-connected', userId);
-    io.to(roomId).emit('user-joined', { totalUsers: count });
-
-    const messageHandler = (messageRoomId, message) => {
-      if (messageRoomId !== roomId) return;
-
-      io.to(roomId).emit('receive-message', {
-        ...message,
-        timestamp: new Date(),
-      });
-    };
-
-    const disconnectHandler = () => {
-      console.log(`User ${userId} disconnected from room ${roomId}`);
-      socket.to(roomId).emit('user-disconnected', userId);
-      const newCount = updateRoomCount(roomId, -1);
-      io.to(roomId).emit('user-joined', { totalUsers: newCount });
-
-      socket.removeListener('disconnect', disconnectHandler);
-      socket.removeListener('send-message', messageHandler);
-    };
-
-    socket.on('send-message', messageHandler);
-    socket.on('disconnect', disconnectHandler);
+  socket.on('disconnect', () => {
+    console.log('🔌 Socket disconnected:', socket.id);
   });
 });
-
-function updateRoomCount(roomId, change) {
-  const currentCount = rooms.get(roomId) || 0;
-  const newCount = Math.max(0, currentCount + change);
-  if (newCount === 0) {
-    rooms.delete(roomId);
-  } else {
-    rooms.set(roomId, newCount);
-  }
-  return newCount;
-}
 
 // Error handler
 app.use((err, req, res, next) => {
