@@ -5,13 +5,24 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
+const https = require('https');
+const fs = require('fs');
 
 // Load environment variables
 dotenv.config();
 
 // Create Express app and HTTP server
 const app = express();
-const server = http.createServer(app);
+let server;
+if (process.env.NODE_ENV === 'production') {
+  const options = {
+    key: fs.readFileSync('server-key.pem'),
+    cert: fs.readFileSync('server-cert.pem')
+  };
+  server = https.createServer(options, app);
+} else {
+  server = http.createServer(app);
+}
 
 // Basic middleware
 app.use(express.json());
@@ -27,7 +38,11 @@ const allowedOrigins = [
 const corsOptions = {
   origin: function (origin, callback) {
     console.log('Request origin:', origin);
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.error('Origin not allowed:', origin);
@@ -46,6 +61,7 @@ app.use(cors(corsOptions));
 const peerServer = ExpressPeerServer(server, {
   debug: true,
   path: '/',
+  ssl: process.env.NODE_ENV === 'production',
   port: process.env.PORT || 5000,
   allow_discovery: true,
   proxied: true,
@@ -92,23 +108,14 @@ app.get('/meeting/:id', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    peerjs: '✅',
-    socketio: '✅'
-  });
-});
-
 // Health check route
-app.get('/', (req, res) => {
+app.get('/health', (req, res) => {
   res.json({
-    message: 'Zoomie server is running',
-    env: {
-      nodeEnv: process.env.NODE_ENV,
-      frontendUrl: process.env.FRONTEND_URL,
-      mongoDbConnected: mongoose.connection.readyState === 1,
-    },
+    status: 'ok',
+    environment: process.env.NODE_ENV || 'development',
+    peerjs: '✅',
+    socketio: '✅',
+    origin: req.headers.origin || 'no origin'
   });
 });
 

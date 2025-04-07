@@ -119,15 +119,19 @@ const Meeting: React.FC = () => {
 
     const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
     const host = new URL(backendUrl).hostname;
-    const port = new URL(backendUrl).port || '5000';
+    const isProduction = !host.includes('localhost');
     
-    console.log('🔗 PeerJS connecting to:', { host, port });
+    console.log('🔗 PeerJS connecting to:', { 
+      host,
+      secure: isProduction,
+      path: '/peerjs'
+    });
 
     const newPeer = new Peer(peerId, {
       host,
-      port: parseInt(port),
+      port: isProduction ? 443 : 5000,
       path: '/peerjs',
-      secure: false,
+      secure: isProduction,
       debug: 3,
       config: {
         iceServers: [
