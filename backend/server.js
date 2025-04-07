@@ -17,12 +17,29 @@ const server = http.createServer(app);
 app.use(express.json());
 
 // CORS setup - must be before routes
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://lemon-uzoe.vercel.app',
+  'https://lemon-uzoe.netlify.app'
+];
+
 const corsOptions = {
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'https://lemon-uzoe.vercel.app'],
+  origin: function (origin, callback) {
+    console.log('Request origin:', origin);
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.error('Origin not allowed:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin'],
+  credentials: true,
+  optionsSuccessStatus: 200
 };
+
 app.use(cors(corsOptions));
 
 // PeerJS Server setup
@@ -31,7 +48,8 @@ const peerServer = ExpressPeerServer(server, {
   path: '/',
   port: process.env.PORT || 5000,
   allow_discovery: true,
-  proxied: false
+  proxied: true,
+  corsOptions: corsOptions
 });
 
 // Mount PeerJS server
@@ -208,6 +226,6 @@ server.listen(PORT, () => {
   console.log(`
 🚀 Server running on port ${PORT}
 📡 PeerJS server at /peerjs
-🌐 CORS origins: ${corsOptions.origin.join(', ')}
+🌐 CORS origins: ${allowedOrigins.join(', ')}
   `);
 });
