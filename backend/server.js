@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
+const { router: meetingRouter, rooms } = require('./routes/meeting');
 
 // Load environment variables
 dotenv.config();
@@ -19,7 +20,7 @@ app.use(express.json());
 // CORS setup - must be before routes
 const corsOptions = {
   origin: function(origin, callback) {
-    // Allow any origin
+    console.log('🌐 Incoming request from origin:', origin);
     callback(null, true);
   },
   credentials: true,
@@ -48,9 +49,6 @@ const io = socketIO(server, {
   transports: ['websocket', 'polling']
 });
 
-// Initialize rooms Map
-const rooms = new Map();
-
 // Routes
 app.get('/', (req, res) => {
   res.json({ 
@@ -70,30 +68,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Meeting routes
-app.get('/meeting/:id', (req, res) => {
-  try {
-    const meetingId = req.params.id;
-    console.log(`📝 GET request for meeting:`, meetingId);
-    
-    if (!rooms.has(meetingId)) {
-      console.log('🆕 Creating new meeting room:', meetingId);
-      rooms.set(meetingId, { users: new Set() });
-    }
-    
-    res.json({ 
-      meetingId,
-      message: 'Meeting created/joined successfully',
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('❌ Error in /meeting/:id:', error);
-    res.status(500).json({ 
-      error: 'Failed to create/join meeting',
-      details: error.message
-    });
-  }
-});
+// Mount meeting routes
+app.use('/meeting', meetingRouter);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
