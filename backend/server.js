@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 const { router: meetingRouter, rooms } = require('./routes/meeting');
@@ -17,20 +16,19 @@ const server = http.createServer(app);
 // Basic middleware
 app.use(express.json());
 
-// CORS setup - must be before routes
-const corsOptions = {
-  origin: function(origin, callback) {
-    console.log('🌐 Incoming request from origin:', origin);
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'Origin'],
-  optionsSuccessStatus: 200
-};
-
-// Apply CORS to all routes
-app.use(cors(corsOptions));
+// Enable CORS for all routes
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 // PeerJS Server setup
 const peerServer = ExpressPeerServer(server, {
@@ -45,7 +43,16 @@ app.use('/peerjs', peerServer);
 
 // Socket.IO setup with same CORS
 const io = socketIO(server, {
-  cors: corsOptions,
+  cors: {
+    origin: function(origin, callback) {
+      console.log('🌐 Incoming request from origin:', origin);
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'Origin'],
+    optionsSuccessStatus: 200
+  },
   transports: ['websocket', 'polling']
 });
 
