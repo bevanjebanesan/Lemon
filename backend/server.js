@@ -56,10 +56,15 @@ const corsOptions = {
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Origin'],
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 204,
+  preflightContinue: false
 };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
 
 // PeerJS Server setup
 const peerServer = ExpressPeerServer(server, {
@@ -113,10 +118,14 @@ app.get('/health', (req, res) => {
 });
 
 // Meeting routes
-app.get('/meeting/:id', (req, res) => {
+app.all('/meeting/:id', cors(corsOptions), (req, res) => {
   try {
+    if (req.method === 'OPTIONS') {
+      return res.status(204).send();
+    }
+
     const meetingId = req.params.id;
-    console.log('📝 Creating/joining meeting:', meetingId);
+    console.log(`📝 ${req.method} request for meeting:`, meetingId);
     
     if (!rooms.has(meetingId)) {
       console.log('🆕 Creating new meeting room:', meetingId);
