@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
+const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 
@@ -16,58 +17,30 @@ const server = http.createServer(app);
 app.use(express.json());
 
 // CORS setup - must be before routes
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  console.log('🌐 Request origin:', origin);
+const corsOptions = {
+  origin: true, // Allow all origins
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
 
-  // Allow localhost and any Vercel preview URLs
-  if (origin && (
-    origin.includes('localhost') ||
-    origin.includes('lemon-uzoe') ||
-    origin.includes('vercel.app')
-  )) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    console.log('👋 Handling OPTIONS preflight for:', req.url);
-    return res.status(204).end();
-  }
-
-  next();
-});
+// Apply CORS to all routes
+app.use(cors(corsOptions));
 
 // PeerJS Server setup
 const peerServer = ExpressPeerServer(server, {
   debug: true,
   path: '/',
   port: process.env.PORT || 5000,
-  allow_discovery: true,
   proxied: true
 });
 
 // Mount PeerJS server
 app.use('/peerjs', peerServer);
 
-// PeerJS event handlers
-peerServer.on('connection', (client) => {
-  console.log('✅ PeerJS Client connected:', client.getId());
-});
-
-peerServer.on('disconnect', (client) => {
-  console.log('❌ PeerJS Client disconnected:', client.getId());
-});
-
-peerServer.on('error', (error) => {
-  console.error('⚠️ PeerJS Server error:', error);
-});
-
-// Socket.IO setup
+// Socket.IO setup with same CORS
 const io = socketIO(server, {
+  cors: corsOptions,
   transports: ['websocket', 'polling']
 });
 
@@ -169,7 +142,7 @@ process.on('SIGTERM', () => {
   });
 });
 
-// Start server (using server.listen, not app.listen)
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`
