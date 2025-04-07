@@ -6,48 +6,65 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 
+// Load environment variables
 dotenv.config();
 
+// Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
-
-// PeerJS setup
-const peerServer = ExpressPeerServer(server, {
-  debug: true,
-  path: '/peerjs',
-  allow_discovery: true,
-});
-
-peerServer.on('connection', (client) => {
-  console.log('PeerJS Client connected:', client.getId());
-});
-peerServer.on('disconnect', (client) => {
-  console.log('PeerJS Client disconnected:', client.getId());
-});
-peerServer.on('error', (error) => {
-  console.error('PeerJS Server error:', error);
-});
-
-app.use('/peerjs', peerServer);
 
 // Basic middleware
 app.use(express.json());
 
-// CORS setup
-app.use(cors({
-  origin: true, // Allow all origins in development
+// CORS setup - must be before routes
+const corsOptions = {
+  origin: ['http://localhost:3000', 'http://localhost:3001', 'https://lemon-uzoe.vercel.app'],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
-}));
+};
+app.use(cors(corsOptions));
+
+// PeerJS Server setup
+const peerServer = ExpressPeerServer(server, {
+  debug: true,
+  path: '/',
+  port: process.env.PORT || 5000,
+  allow_discovery: true,
+  proxied: false
+});
+
+// Mount PeerJS server
+app.use('/peerjs', peerServer);
+
+// PeerJS event handlers
+peerServer.on('connection', (client) => {
+  console.log('✅ PeerJS Client connected:', client.getId());
+});
+
+peerServer.on('disconnect', (client) => {
+  console.log('❌ PeerJS Client disconnected:', client.getId());
+});
+
+peerServer.on('error', (error) => {
+  console.error('⚠️ PeerJS Server error:', error);
+});
+
+// Socket.IO setup
+const io = socketIO(server, {
+  cors: corsOptions,
+  transports: ['websocket', 'polling']
+});
+
+// Initialize rooms Map
+const rooms = new Map();
 
 // Routes
 app.get('/meeting/:id', (req, res) => {
   const meetingId = req.params.id;
+  console.log('📝 Creating/joining meeting:', meetingId);
   
-  // Check if meeting exists in our rooms Map
   if (!rooms.has(meetingId)) {
-    // If it doesn't exist, create it
     rooms.set(meetingId, { users: new Set() });
   }
   
@@ -58,7 +75,11 @@ app.get('/meeting/:id', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ 
+    status: 'ok',
+    peerjs: '✅',
+    socketio: '✅'
+  });
 });
 
 // Health check route
@@ -92,26 +113,9 @@ app.get('/meeting/:id', (req, res) => {
   }
 });
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.status(500).json({ error: err.message });
-});
-
-// Socket.IO setup with CORS
-const io = socketIO(server, {
-  cors: {
-    origin: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    credentials: true
-  },
-  transports: ['websocket', 'polling']
-});
-
-const rooms = new Map();
-
+// Socket.IO connection handling
 io.on('connection', (socket) => {
-  console.log('Socket.IO Client connected:', socket.id);
+  console.log('🔌 Socket connected:', socket.id);
 
   socket.on('error', (error) => {
     console.error('Socket error:', error);
@@ -170,6 +174,12 @@ function updateRoomCount(roomId, change) {
   return newCount;
 }
 
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('🚨 Server error:', err);
+  res.status(500).json({ error: err.message });
+});
+
 // MongoDB connection
 function connectToMongoDB() {
   mongoose.connect(process.env.MONGODB_URI)
@@ -192,8 +202,12 @@ process.on('SIGTERM', () => {
   });
 });
 
+// Start server (using server.listen, not app.listen)
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'https://lemon-uzoe.vercel.app'}`);
+  console.log(`
+🚀 Server running on port ${PORT}
+📡 PeerJS server at /peerjs
+🌐 CORS origins: ${corsOptions.origin.join(', ')}
+  `);
 });

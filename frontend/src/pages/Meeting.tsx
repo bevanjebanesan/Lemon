@@ -112,62 +112,60 @@ const Meeting: React.FC = () => {
   };
 
   const setupPeerConnection = async (stream: MediaStream): Promise<Peer | null> => {
-    if (!stream || !backendUrl) return null;
+    if (!stream) return null;
 
-    const peerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    console.log('Initializing PeerJS with ID:', peerId);
+    const peerId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    console.log('🎥 Initializing PeerJS with ID:', peerId);
 
-    const peerHost = new URL(backendUrl).hostname;
-    console.log('PeerJS host:', peerHost);
+    const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+    const host = new URL(backendUrl).hostname;
+    const port = new URL(backendUrl).port || '5000';
+    
+    console.log('🔗 PeerJS connecting to:', { host, port });
 
     const newPeer = new Peer(peerId, {
-      host: peerHost,
-      port: 443,
+      host,
+      port: parseInt(port),
       path: '/peerjs',
-      secure: true,
+      secure: false,
       debug: 3,
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-          {
-            urls: 'turn:numb.viagenie.ca',
-            username: 'webrtc@live.com',
-            credential: 'muazkh'
-          }
+          { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       }
     });
 
     return new Promise((resolve) => {
+      let timeoutId: NodeJS.Timeout;
+
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+      };
+
       newPeer.on('open', () => {
-        console.log('PeerJS connected with ID:', peerId);
+        console.log('✅ PeerJS connected with ID:', peerId);
+        cleanup();
         resolve(newPeer);
       });
 
-      newPeer.on('error', (err) => {
-        console.error('PeerJS error:', err);
-        if (err.type === 'network') {
-          setError('Network connection lost. Please check your internet connection.');
-        } else if (err.type === 'disconnected') {
-          setError('Disconnected from the meeting. Trying to reconnect...');
-          newPeer.reconnect();
-        } else {
-          setError('Connection error. Please try rejoining the meeting.');
-        }
+      newPeer.on('error', (error) => {
+        console.error('❌ PeerJS error:', error);
+        cleanup();
         resolve(null);
       });
 
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!newPeer.disconnected) {
-          resolve(null);
-          setError('Connection timeout. Please try again.');
-        }
-      }, 10000);
+      newPeer.on('connection', (conn) => {
+        console.log('🤝 Incoming peer connection:', conn.peer);
+      });
+
+      // Set a timeout for the connection attempt
+      timeoutId = setTimeout(() => {
+        console.error('⏰ PeerJS connection timeout');
+        newPeer.destroy();
+        resolve(null);
+      }, 10000); // 10 seconds timeout
     });
   };
 
