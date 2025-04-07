@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 
@@ -17,64 +16,38 @@ const server = http.createServer(app);
 app.use(express.json());
 
 // CORS setup - must be before routes
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'https://lemon-uzoe.vercel.app',
-  'https://lemon-uzoe-pnvcco14a-bevangss-projects.vercel.app',
-  'https://lemon-uzoe.netlify.app'
-];
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  console.log('🌐 Request origin:', origin);
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    console.log('🌐 Request origin:', origin);
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      return callback(null, true);
-    }
+  // Allow localhost and any Vercel preview URLs
+  if (origin && (
+    origin.includes('localhost') ||
+    origin.includes('lemon-uzoe') ||
+    origin.includes('vercel.app')
+  )) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
 
-    // Check if origin matches any allowed pattern
-    const isAllowed = allowedOrigins.some(allowed => {
-      // Exact match
-      if (origin === allowed) return true;
-      // Match Vercel preview URLs
-      if (allowed === 'https://lemon-uzoe.vercel.app' && 
-          origin.includes('lemon-uzoe') && 
-          origin.includes('vercel.app')) {
-        return true;
-      }
-      return false;
-    });
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    console.log('👋 Handling OPTIONS preflight for:', req.url);
+    return res.status(204).end();
+  }
 
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.error('❌ Origin not allowed:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin'],
-  credentials: true,
-  optionsSuccessStatus: 204,
-  preflightContinue: false
-};
-
-// Apply CORS middleware
-app.use(cors(corsOptions));
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
+  next();
+});
 
 // PeerJS Server setup
 const peerServer = ExpressPeerServer(server, {
   debug: true,
   path: '/',
-  ssl: false,
   port: process.env.PORT || 5000,
   allow_discovery: true,
-  proxied: true,
-  corsOptions: corsOptions
+  proxied: true
 });
 
 // Mount PeerJS server
@@ -95,7 +68,6 @@ peerServer.on('error', (error) => {
 
 // Socket.IO setup
 const io = socketIO(server, {
-  cors: corsOptions,
   transports: ['websocket', 'polling']
 });
 
@@ -104,7 +76,11 @@ const rooms = new Map();
 
 // Routes
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Zoomie API is running' });
+  res.json({ 
+    status: 'ok', 
+    message: 'Zoomie API is running',
+    origin: req.headers.origin || 'no origin'
+  });
 });
 
 app.get('/health', (req, res) => {
@@ -118,14 +94,10 @@ app.get('/health', (req, res) => {
 });
 
 // Meeting routes
-app.all('/meeting/:id', cors(corsOptions), (req, res) => {
+app.get('/meeting/:id', (req, res) => {
   try {
-    if (req.method === 'OPTIONS') {
-      return res.status(204).send();
-    }
-
     const meetingId = req.params.id;
-    console.log(`📝 ${req.method} request for meeting:`, meetingId);
+    console.log(`📝 GET request for meeting:`, meetingId);
     
     if (!rooms.has(meetingId)) {
       console.log('🆕 Creating new meeting room:', meetingId);
@@ -203,6 +175,5 @@ server.listen(PORT, () => {
   console.log(`
 🚀 Server running on port ${PORT}
 📡 PeerJS server at /peerjs
-🌐 CORS origins: ${allowedOrigins.join(', ')}
   `);
 });
