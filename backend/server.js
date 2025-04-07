@@ -18,10 +18,14 @@ app.use(express.json());
 
 // CORS setup - must be before routes
 const corsOptions = {
-  origin: true, // Allow all origins
+  origin: function(origin, callback) {
+    // Allow any origin
+    callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Accept', 'Content-Type', 'Authorization', 'Origin'],
+  optionsSuccessStatus: 200
 };
 
 // Apply CORS to all routes
