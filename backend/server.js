@@ -74,8 +74,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Mount meeting routes
-app.use('/meeting', meetingRouter);
+// Mount meeting routes at the root level
+app.use('/', meetingRouter);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
