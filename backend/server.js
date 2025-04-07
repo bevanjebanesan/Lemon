@@ -21,20 +21,35 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'https://lemon-uzoe.vercel.app',
+  'https://lemon-uzoe-pnvcco14a-bevangss-projects.vercel.app',
   'https://lemon-uzoe.netlify.app'
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    console.log('Request origin:', origin);
+    console.log('🌐 Request origin:', origin);
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
       return callback(null, true);
     }
-    if (allowedOrigins.indexOf(origin) !== -1) {
+
+    // Check if origin matches any allowed pattern
+    const isAllowed = allowedOrigins.some(allowed => {
+      // Exact match
+      if (origin === allowed) return true;
+      // Match Vercel preview URLs
+      if (allowed === 'https://lemon-uzoe.vercel.app' && 
+          origin.includes('lemon-uzoe') && 
+          origin.includes('vercel.app')) {
+        return true;
+      }
+      return false;
+    });
+
+    if (isAllowed) {
       callback(null, true);
     } else {
-      console.error('Origin not allowed:', origin);
+      console.error('❌ Origin not allowed:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
