@@ -19,21 +19,28 @@ import MicIcon from '@mui/icons-material/Mic';
 import MicOffIcon from '@mui/icons-material/MicOff';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import VideocamOffIcon from '@mui/icons-material/VideocamOff';
-import { Message } from '../types';
 import ChatDrawer from '../components/ChatDrawer';
+
+interface ChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  content: string;
+  timestamp: Date;
+}
 
 const Meeting: React.FC = () => {
   const { id: meetingId } = useParams<{ id: string }>();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [peer, setPeer] = useState<Peer | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [participantCount, setParticipantCount] = useState(1);
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [isLoading, setIsLoading] = useState(true);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
+  const [participantCount, setParticipantCount] = useState<number>(1);
+  const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(true);
+  const [isVideoEnabled, setIsVideoEnabled] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteVideosRef = useRef<HTMLDivElement>(null);
@@ -41,7 +48,7 @@ const Meeting: React.FC = () => {
   const meetingUrl = `${process.env.REACT_APP_FRONTEND_URL}/meeting/${meetingId}`;
   const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
-  const initializeMediaDevices = async (retryCount = 0) => {
+  const initializeMediaDevices = async (retryCount = 0): Promise<MediaStream | null> => {
     try {
       const constraints = {
         audio: {
@@ -104,8 +111,8 @@ const Meeting: React.FC = () => {
     }
   };
 
-  const setupPeerConnection = async (stream: MediaStream) => {
-    if (!stream || !backendUrl) return;
+  const setupPeerConnection = async (stream: MediaStream): Promise<Peer | null> => {
+    if (!stream || !backendUrl) return null;
 
     const peerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     console.log('Initializing PeerJS with ID:', peerId);
@@ -135,19 +142,33 @@ const Meeting: React.FC = () => {
       }
     });
 
-    newPeer.on('error', (err) => {
-      console.error('PeerJS error:', err);
-      if (err.type === 'network') {
-        setError('Network connection lost. Please check your internet connection.');
-      } else if (err.type === 'disconnected') {
-        setError('Disconnected from the meeting. Trying to reconnect...');
-        newPeer.reconnect();
-      } else {
-        setError('Connection error. Please try rejoining the meeting.');
-      }
-    });
+    return new Promise((resolve) => {
+      newPeer.on('open', () => {
+        console.log('PeerJS connected with ID:', peerId);
+        resolve(newPeer);
+      });
 
-    return newPeer;
+      newPeer.on('error', (err) => {
+        console.error('PeerJS error:', err);
+        if (err.type === 'network') {
+          setError('Network connection lost. Please check your internet connection.');
+        } else if (err.type === 'disconnected') {
+          setError('Disconnected from the meeting. Trying to reconnect...');
+          newPeer.reconnect();
+        } else {
+          setError('Connection error. Please try rejoining the meeting.');
+        }
+        resolve(null);
+      });
+
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        if (!newPeer.disconnected) {
+          resolve(null);
+          setError('Connection timeout. Please try again.');
+        }
+      }, 10000);
+    });
   };
 
   const initializeMeeting = async () => {
@@ -223,7 +244,7 @@ const Meeting: React.FC = () => {
 
     socket.on('user-connected', handleUserConnected);
     socket.on('user-disconnected', handleUserDisconnected);
-    socket.on('receive-message', (message: Message) => {
+    socket.on('receive-message', (message: ChatMessage) => {
       console.log('Received message:', message);
       setMessages(prev => [...prev, message]);
     });
@@ -272,7 +293,7 @@ const Meeting: React.FC = () => {
   const handleSendMessage = (content: string) => {
     if (!socket || !content.trim()) return;
 
-    const message: Message = {
+    const message: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       userId: peer?.id || '',
       userName: 'You',
