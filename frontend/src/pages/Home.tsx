@@ -22,39 +22,30 @@ const Home: React.FC = () => {
       const newMeetingId = uuidv4();
       console.log('Creating meeting with ID:', newMeetingId);
       
-      // Verify backend is accessible
-      const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      console.log('Backend URL:', backendUrl); // Debug log
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+      console.log('Using backend URL:', backendUrl);
 
-      if (!backendUrl) {
-        throw new Error('Backend URL not configured');
-      }
-
-      console.log('Fetching from:', `${backendUrl}/meeting/${newMeetingId}`); // Debug log
       const response = await fetch(`${backendUrl}/meeting/${newMeetingId}`, {
         method: 'GET',
         headers: {
+          'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
+        mode: 'cors', // Explicitly set CORS mode
         credentials: 'include'
       });
 
-      console.log('Response status:', response.status);
-      // Log headers directly
-      console.log('Response headers:', Object.fromEntries(response.headers));
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Error response:', errorText); // Debug log
         throw new Error(`Failed to create meeting: ${errorText}`);
       }
 
       const data = await response.json();
-      console.log('Meeting created successfully:', data); // Debug log
+      console.log('Meeting created successfully:', data);
       navigate(`/meeting/${newMeetingId}`);
     } catch (error) {
-      console.error('Detailed error creating meeting:', error);
-      alert('Failed to create meeting. Please try again. Error: ' + (error instanceof Error ? error.message : String(error)));
+      console.error('Error creating meeting:', error);
+      alert('Failed to create meeting. Please try again.');
     } finally {
       setIsLoading(false);
     }

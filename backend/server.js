@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const dotenv = require('dotenv');
 const { ExpressPeerServer } = require('peer');
 
@@ -30,18 +29,30 @@ peerServer.on('error', (error) => {
 
 app.use('/peerjs', peerServer);
 
-// ✅ Clean and correct CORS setup for Vercel frontend
-const corsOptions = {
-  origin: 'https://lemon-uzoe.vercel.app',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200,
-};
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Preflight
-
+// Basic middleware
 app.use(express.json());
+
+// CORS setup - before any routes
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://lemon-uzoe.vercel.app'
+];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -80,13 +91,13 @@ app.get('/meeting/:id', (req, res) => {
   }
 });
 
-// Socket.IO setup
+// Socket.IO setup with same CORS config
 const io = socketIO(server, {
-  cors: corsOptions,
-  transports: ['websocket', 'polling'],
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  allowEIO3: true,
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    credentials: true
+  }
 });
 
 const rooms = new Map();
