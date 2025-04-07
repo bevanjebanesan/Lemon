@@ -14,51 +14,32 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+// CORS configuration
+const corsOptions = {
+  origin: 'https://lemon-uzoe-jw6v125v1-bevangss-projects.vercel.app', // ✅ Use your deployed frontend URL here
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true // ✅ Important for sending cookies or auth headers
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
 // Basic middleware
 app.use(express.json());
 
-// Simple CORS middleware
-app.use(cors());
-
-// Add headers before the routes are defined
-app.use(function (req, res, next) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Accept');
-    res.setHeader('Access-Control-Allow-Credentials', 'false');
-
-    // Handle OPTIONS method
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-
-    next();
+// Test route to check CORS
+app.get('/test-cors', (req, res) => {
+  res.json({
+    message: 'CORS is working!',
+    origin: req.headers.origin || 'no origin'
+  });
 });
 
-// PeerJS Server setup
-const peerServer = ExpressPeerServer(server, {
-  debug: true,
-  path: '/',
-  port: process.env.PORT || 5000,
-  proxied: true
-});
-
-// Mount PeerJS server
-app.use('/peerjs', peerServer);
-
-// Socket.IO setup
-const io = socketIO(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    allowedHeaders: ["content-type"]
-  }
-});
-
-// Routes
+// Health check and root route
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     message: 'Zoomie API is running',
     origin: req.headers.origin || 'no origin'
   });
@@ -74,17 +55,35 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Mount meeting routes at the root level
-app.use('/', meetingRouter);
+// Mount meeting routes
+app.use('/meeting', meetingRouter);
 
-// Socket.IO connection handling
+// PeerJS Server setup
+const peerServer = ExpressPeerServer(server, {
+  debug: true,
+  path: '/',
+  port: process.env.PORT || 5000,
+  proxied: true
+});
+app.use('/peerjs', peerServer);
+
+// Socket.IO setup with matching CORS config
+const io = socketIO(server, {
+  cors: {
+    origin: 'https://lemon-uzoe-jw6v125v1-bevangss-projects.vercel.app',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Socket.IO logic
 io.on('connection', (socket) => {
   console.log('🔌 Socket connected:', socket.id);
 
   socket.on('join-meeting', (meetingId) => {
     console.log('👋 User joining meeting:', meetingId);
     socket.join(meetingId);
-    
+
     const room = rooms.get(meetingId);
     if (room) {
       room.users.add(socket.id);
@@ -115,9 +114,9 @@ function connectToMongoDB() {
       setTimeout(connectToMongoDB, 5000);
     });
 }
-
 connectToMongoDB();
 
+// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received. Closing server...');
   server.close(() => {

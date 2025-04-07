@@ -20,19 +20,25 @@ const Home: React.FC = () => {
     try {
       setIsLoading(true);
       const newMeetingId = uuidv4();
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
-      
+      const backendUrl = process.env.REACT_APP_BACKEND_URL;
+
+      if (!backendUrl) {
+        throw new Error('REACT_APP_BACKEND_URL is not defined in your .env');
+      }
+
       console.log('Creating meeting with backend URL:', backendUrl);
-      
+
       const response = await fetch(`${backendUrl}/meeting/${newMeetingId}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         mode: 'cors',
-        credentials: 'omit'
+        credentials: 'omit',
       });
+
+      console.log('Response Headers:', [...response.headers.entries()]);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -43,9 +49,9 @@ const Home: React.FC = () => {
       const data = await response.json();
       console.log('Meeting created successfully:', data);
       navigate(`/meeting/${newMeetingId}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating meeting:', error);
-      alert('Failed to create meeting. Please try again.');
+      alert(error.message || 'Failed to create meeting. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -56,23 +62,33 @@ const Home: React.FC = () => {
 
     try {
       setIsLoading(true);
-      console.log('Joining meeting:', meetingId);
-      
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
+
       if (!backendUrl) {
-        throw new Error('Backend URL not configured');
+        throw new Error('REACT_APP_BACKEND_URL is not defined in your .env');
       }
 
-      const response = await fetch(`${backendUrl}/meeting/${meetingId}`);
+      console.log('Joining meeting:', meetingId);
+
+      const response = await fetch(`${backendUrl}/meeting/${meetingId}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit',
+      });
+
       if (!response.ok) {
-        throw new Error('Meeting not found');
+        const errorText = await response.text();
+        throw new Error(`Failed to join meeting: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       console.log('Meeting exists, joining...');
       navigate(`/meeting/${meetingId}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error joining meeting:', error);
-      alert('Failed to join meeting. Please check the meeting ID and try again.');
+      alert(error.message || 'Failed to join meeting. Please check the meeting ID and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -115,7 +131,7 @@ const Home: React.FC = () => {
               placeholder="Enter Meeting ID"
               value={meetingId}
               onChange={(e) => setMeetingId(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && joinMeeting()}
+              onKeyDown={(e) => e.key === 'Enter' && joinMeeting()}
               disabled={isLoading}
             />
             <Button
